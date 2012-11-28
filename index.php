@@ -7,7 +7,7 @@
 
 define('VERSION', '0.1');            // Riak Admin version
 
-define('HOST', '127.0.0.1');   // your RIAK server IP
+define('HOST', '192.168.219.128');   // your RIAK server IP
 define('PORT', 8098);                // your RIAK server PORT
 define('VERBOSE', true);
 
@@ -23,114 +23,85 @@ error_reporting(1);
 
 $start_page = microtime();
 require_once ("lib/riak-client.php");
-$backend = new riakAdminBackend($_GET['bucketName']);
 
-switch($_GET['cmd'])	{
-	case 'deleteKey':
-		$backend->deleteKey($_GET['key']);
-	break;
-	case 'createBucket':
-		$backend->createBucket();
-	break;
-	case 'delBucket':
-		$backend->deleteBucket();
-	break;
-	case 'updateKey':
-		$backend->updateKey($_GET['key'], array_combine($_POST['key'], $_POST['value']));
-		echo '<div class="msg">Value updated in RIAK.</div>';
-	break;
+// init the RIAK connection
+$riak = new RiakClient(HOST, PORT);
+if (!$riak->isAlive()){
+    die ("I couldn't ping the server. Check the HOST AND PORT settings...");
 }
 
-class riakAdminBackend	{
-	
-	public $riak;
-	public $activeBucketObj = null;
-	private $activeBucket = "";
-	
-	// init the RIAK connection
-	function __construct($bucketName=null)	{
-		$this->riak = new RiakClient(HOST, PORT);
-		if ($this->riak->isAlive() == false){
-			die ("I couldn't ping the server. Check the HOST AND PORT settings...");
-		}
-		
-		// init the $bucket && $key
-		if ($bucketName != null){
-			$this->pickBucket($bucketName);
-		}
-	}
-	
-	function pickBucket($bucketName, $ghost=false)	{ //if ghost flag is true then make the bucket with some random number for short term use
-		$ghost = ($ghost == true) ? rand() : "";
-		$this->buckets[$bucketName.$ghost] = $this->riak->bucket($bucketName);
-		$this->switchBucket($bucketName.$ghost);
-		return $this->bucket[$bucketName.$ghost];
-	}
-	
-	function switchBucket($bucketName)	{
-		if($bucketName == $this->activeBucket || $this->bucketInPool($bucketName) == true)	{
-			$this->activeBucket = $bucketName;
-			return $this->bucket[$bucketName];
-		}
-		return $this->pickBucket($bucketName, false);
-	}
-	
-	function createBucket($bucketName=null, $key, $value)	{
-		$bucketName = ($bucketName != null) ? $bucketName : $this->activeBucket;
-		if($bucketName == $this->activeBucket || $this->bucketInPool($bucketName) == false) {
-			$this->buckets[$bucketName]->newObject("created")->setData(1)->store();
-			return true;
-		}
-		return false;
-	}
-	
-	function bucketInPool($bucketName)	{
-		if(array_key_exists($bucketName, $this->buckets) == true)	{
-			return true;
-		}
-		return false;
-	}
-	
-	function deleteKey($key, $bucketName=null, $fast=false)	{
-		$bucketName = ($bucketName != null) ? $bucketName : $this->activeBucket;
-		if($bucketName == $this->activeBucket || $this->bucketInPool($bucketName) == true && ($fast == true || $this->keyVaild($key) == true))	{
-			$this->buckets[$bucketName]->get($key)->delete();
-			return true;
-		}
-		return false;
-	}
-	
-	function deleteBucket($bucketName=null)	{
-		ignore_user_abort(true); //once you start you cant stop
-		set_time_limit(0); //this could take a while
-		$bucketName = ($bucketName != null) ? $bucketName : $this->activeBucket;
-		if($this->bucketInPool($bucketName) == true)	{
-			$keys = $this->buckets[$bucketName]->getKeys();
-			foreach($keys as $dat)	{
-				$this->deleteKey($dat);
-			}
-			// i don't need to delete the bucket, since it will be removed automatically when no keys are in it
-		}
-	}
-	
-	function updateKey($key, $value, $bucketName=null)	{
-		$bucketName = ($bucketName != null) ? $bucketName : $this->activeBucket;
-		if($bucketName==$this->activeBucket || $this->switchBucket($bucketName) == true)	{
-			$this->buckets[$bucketName]->newObject($key)->setData($value)->store();
-		}
-	}
-	
-	function keyVaild($key)	{
-		if(is_string($key) == true)	{
-			return true;
-		}
-		return false;
-	}
+// init the $bucket && $key
+if (isset($_GET['bucketName'])){
+    $bucket = new RiakBucket($riak, $_GET['bucketName']);
+    $key = new RiakObject($riak, $bucket, $_GET['key']);
 }
 
-//stuff so the lower html does not need to be edited yet
-$riak =& $backend->riak;
-$bucket =& $backend->buckets[$_GET['bucketName']];
+// delete a key
+if (($_GET['cmd'] == "deleteKey") && ($_GET['bucketName']) && ($_GET['key'])){
+    $key->delete();
+    $_GET['key']='';
+}
+
+// create a bucket with key=>value : "created"=>1
+if (($_GET['cmd'] == 'createBucket') && ($_POST['bucketName'])) {
+    $data=array("created"=>1);
+    $bucket = new RiakBucket ($riak, $_POST['bucketName']);
+    $x = $bucket->newObject("", $data);
+    $x->store();
+}
+
+// delete a bucket and all keys from it
+if (($_GET['cmd'] == 'delBucket') && ($_GET['bucketName'])) {
+    $keys = $bucket->getKeys();
+    $count = count($keys);
+    for ($i=0; $i<$count; $i++) {
+        $key = new RiakObject($riak, $bucket, $keys[$i]);
+        $key->delete();
+    }
+    // i don't need to delete the bucket, since it will be removed automatically when no keys are in it
+}
+
+// add a new KEY in RIAK
+if (($_GET['cmd'] == 'saveKey')) {
+    $arrVal = $_GET['value'];
+    $arrKey = $_GET['key'];
+    $key_name = $_GET['key_name'];
+    $key = new RiakObject($riak, $bucket, $_GET['key_name']);
+
+    foreach ($arrKey AS $index=>$keyTmp) {
+        if ($arrVal[$index]) {
+            $value = $arrVal[$index];
+            $data[$keyTmp] = $value;
+        }
+    }
+    
+    $obj = $bucket->newObject($key_name, $data);
+    $obj->store();
+
+    $_GET['key'] = $key_name;
+    $_GET['bucket_name'] = $bucket->getName();
+    $_GET['cmd'] = 'useBucket';
+    
+    echo '<div class="msg">Key added.</div>';
+}
+
+// update the KEY with new $data
+if (($_GET['cmd'] == 'updateKey') && (isset($_POST['key'][0])) && (isset($_POST['value'][0]))) {
+    $arrVal = $_POST['value'];
+    $arrKey = $_POST['key'];
+    
+    foreach ($arrKey AS $index => $keyTmp) {
+        if ($arrVal[$index]) {
+            $value = $arrVal[$index];
+            $data[$keyTmp] = $value;
+        }
+    }
+    
+    $obj = $bucket->newObject($_GET['key'], $data);
+    $obj->store();
+    
+    echo '<div class="msg">Value updated in RIAK.</div>';
+}
 
 ?>
 <html>
@@ -144,7 +115,7 @@ $bucket =& $backend->buckets[$_GET['bucketName']];
         .right { background-color: #fff; width: 900px; color: #666; display: table-cell; border: 1px solid #666; text-align: left; margin: 5px; vertical-align: top;}
         .bucketName {font-weight: none;}
         .bucketNameSelected {font-weight: bold;}
-        .bucketActions { font-weight: bold; font-size: 10px; text-decoration: none;}
+        .bucketActions { font-weight: bold; font-size: 10px; text-decoration: none; margin-left: 10px;}
         .content {margin: 10px;}
         .td_left { background-color: #f8f8f8; border: 1px dashed; border-right: 0px; display: table-cell; width:250px; padding: 7px; vertical-align: middle;}
         .td_right { border: 1px dashed; border-left: 0px; display: table-cell; width: 600px; padding: 7px; vertical-align: middle;}
@@ -172,16 +143,14 @@ $bucket =& $backend->buckets[$_GET['bucketName']];
 
 <?php
 // left menu: create new bucket + show list of current ones
-
 function left_menu() {
     global $riak, $_GET;
     // screate a new bucket
     $ret = '
     <center><h3>RiakAdmin v'.VERSION.' @ '.HOST.'</h3>
-    <form name="createBucket" method="GET" action="">
+    <form name="createBucket" method="POST" action="?cmd=createBucket">
         <input type="text" name="bucketName" value="Create a new bucket" onClick="this.value=\'\';">
         <input type="submit" name="ok" value="Create">
-        <input type="hidden" name="cmd" value="createBucket"/>
     </form></center>
     <div class="msgSmall">When creating a new bucket, a key named "created" with value "1" will be set in that bucket.</div>
     <hr>';
@@ -194,14 +163,16 @@ function left_menu() {
     else {
         $ret .= 'List of current buckets:
             <ul type="square">';
-		foreach($buckets as &$dat)	{
-            if ( $dat->getName() == $_GET['bucketName'] ){
-                $ret .= '<li class="bucketNameSelected"><a href="?cmd=useBucket&bucketName='.$dat->getName().'">'.$dat->getName().'</a>';
+        for ($i=0; $i<count($buckets);$i++){
+            if ( $buckets[$i]->getName() == $_GET['bucketName'] ){
+                $ret .= '<li class="bucketNameSelected"><a href="?cmd=useBucket&bucketName='.$buckets[$i]->getName().'">'.$buckets[$i]->getName().'</a><br>
+                    <a href="?cmd=addKey&bucketName='.$_GET['bucketName'].'" class="bucketActions">[ Add a new key ]</a><br>
+                    <a href="?cmd=findKey&bucketName='.$_GET['bucketName'].'" class="bucketActions">[ Find a key ]</a><br>';
             }
             else {
-                $ret .= '<li class="bucketName"><a href="?cmd=useBucket&bucketName='.$dat->getName().'">'.$dat->getName().'</a>';
+                $ret .= '<li class="bucketName"><a href="?cmd=useBucket&bucketName='.$buckets[$i]->getName().'">'.$buckets[$i]->getName().'</a><br>';
             }
-            $ret .= ' <a href="?cmd=delBucket&bucketName='.$dat->getName().'" class="bucketActions">[ Delete bucket ]</a></li>';
+            $ret .= ' <a href="?cmd=delBucket&bucketName='.$buckets[$i]->getName().'" class="bucketActions">[ Delete bucket ]</a><br><br>';
         }
         $ret .= '
             </ul>';
@@ -216,30 +187,75 @@ function right_content() {
 
     $ret = '';
     // if i have a bucket selected, but no KEY, I'll display all keys from it
-    if ((isset($bucket) && (isset($_GET['key']) == false))){
+    if ((isset($bucket) && (!isset($_GET['key'])))){
         $keys=$bucket->getKeys();
 
         // pagination ???
         
         $ret .= '
         <div class="content">
-            <h3>Selected BUCKET: "'.$_GET['bucketName'].'"</h3>
+            <h3>Selected BUCKET: "'.$_GET['bucketName'].'"</h3>';
+        
+        // add a new key in this bucket
+        if ($_GET['cmd'] == 'addKey') {
+            $ret .= '
+            <form method="GET" name="addKey" action="?">
+            <input type="hidden" name="cmd" value="saveKey">
+            <input type="hidden" name="bucketName" value="'.$_GET['bucketName'].'">
+            <div class=content>
+                <div class="td_left">Key name:<div class="msgSmall">Leave empty for random value.</div></div>
+                <div class="td_right"><textarea name="key_name" rows=3 cols="30"></textarea></div>
+            </div>
+            <div id="fieldList">
+                <div class="content">
+                    <div class=td_left><input type=text name=key[]></div>
+                    <div class=td_right><textarea name=value[] rows=3 cols=30></textarea></div>
+                </div>
+            </div>
+            <div style="text-align:center">
+                <input type="submit" name="ok" value="Save">
+                <a href="#" onClick="document.getElementById(\'fieldList\').innerHTML=document.getElementById(\'fieldList\').innerHTML + \'<div class=content><div class=td_left><input type=text name=key[]></div><div class=td_right><textarea name=value[] rows=3 cols=30></textarea></div></div>\'">Add another key => value!</a>
+            </div>
+            </form>';
+            
+            return $ret;
+        }
+        // find a key in this bucket
+        elseif ($_GET['cmd'] == 'findKey') {
+            $ret .= '
+            <form method="GET" name="searchKey" action="?">
+            <input type="hidden" name="cmd" value="searchKey">
+            <input type="hidden" name="bucketName" value="'.$_GET['bucketName'].'">
+            <div class="content">
+                <div class="td_left">Search for:</div>
+                <div class="td_right"><input type="text" name="q" value="">
+                <input type="submit" name="ok" value="Search"></div>
+            </div>
+            </form>';
+            
+            return $ret;
+        }
+        elseif ($_GET['cmd'] == 'searchKey') {
+            // display the search results
+        }
+
+        $ret .= '
             <div class="td_left" align="center"><b>KEY NAME</b></div>
             <div class="td_right" align="center"><b>ACTIONS</b></div>
         </div>';
-        //$total=count($keys);
-        //for ($i=0; $i<$total; $i++){
-		foreach($keys as &$dat)	{
+        $total=0; $count = count($keys);
+        for ($i=0; $i<$count; $i++){
+            $total++;
             $ret .= '
             <div class="content">
-                <div class="td_left"><b>' . $dat . '</b></div>
+                <div class="td_left"><b>' . $keys[$i] . '</b></div>
                 <div class="td_right">
-                    <a href="?cmd=useBucket&bucketName=' . $_GET['bucketName'] .'&key=' . $dat . '">View/Modify</a> | 
-                    <a href="?cmd=deleteKey&bucketName=' . $_GET['bucketName'] .'&key=' . $dat . '">Delete</a>
+                    <a href="?cmd=useBucket&bucketName=' . $_GET['bucketName'] .'&key=' . $keys[$i] . '">View/Modify</a> | 
+                    <a href="?cmd=deleteKey&bucketName=' . $_GET['bucketName'] .'&key=' . $keys[$i] . '">Delete</a>
                 </div>
             </div>';
         }
-        if (isset($keys[0]) == false){
+        if ($total==0){
             $ret = '
             <div class="msg">No keys found in this bucket.</div>';
         }
@@ -247,7 +263,6 @@ function right_content() {
     }
     // else if I have a bucket selected and a KEY, I'll display the key properties
     elseif ((isset($bucket)) && (isset($_GET['key']))){
-		$key = $bucket->get($_GET['key']);
         $ret .= '
         <form name="updateKey" method="POST" action="?cmd=updateKey&bucketName='.$_GET['bucketName'].'&key='.$_GET['key'].'">
         <div class="content">
@@ -286,6 +301,6 @@ function right_content() {
 }
 
 $page_generation = microtime() - $start_page;
-echo '<div class="msg">It took me ' . number_format($page_generation, 2) .' seconds to generate this page...</div>';
+echo '<div class="msg">It took me ' . number_format($page_generation, 3) .' seconds to generate this page...</div>';
 ?>
 <br><br>

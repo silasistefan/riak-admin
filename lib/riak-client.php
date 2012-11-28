@@ -44,7 +44,7 @@ class RiakClient {
    * @param string $prefix - Interface prefix (default "riak")
    * @param string $mapred_prefix - MapReduce prefix (default "mapred")
    */
-  function RiakClient($host='127.0.0.1', $port=8098, $prefix='riak', $mapred_prefix='mapred') {
+  function RiakClient($host='192.168.219.128', $port=8098, $prefix='riak', $mapred_prefix='mapred') {
     $this->host = $host;
     $this->port = $port;
     $this->prefix = $prefix;    
