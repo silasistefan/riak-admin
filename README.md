@@ -13,9 +13,10 @@ Available actions (v0.1):
 - view a key
 - modify a key
 - delete a key
+- add a new key (JSON)
 
 Further actions:
-- add a new key (binary and JSON)
+- add a new key (binary)
 - error reporting
 - change bucket properties
 - find a key in a bucket based on key=>value
