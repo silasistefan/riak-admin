@@ -11,7 +11,7 @@ $start_page = microtime(true);
 require_once ("lib/riak-client.php");
 
 // init the RIAK connection
-$riak = new RiakClient(HOST, PORT);
+$riak = new RiakClient(HOST, HTTP_PORT);
 if (!$riak->isAlive()) {
     die("I couldn't ping the server. Check the HOST AND PORT settings...");
 }
@@ -25,7 +25,7 @@ if (isset($_GET['bucketName'])) {
 // delete a key
 if (($_GET['cmd'] == "deleteKey") && ($_GET['bucketName']) && ($_GET['key'])) {
     $key->delete();
-    $_GET['key'] = '';
+    unset($_GET['key']);
 }
 
 // create a bucket with key=>value : "created"=>1
@@ -38,33 +38,19 @@ if (($_GET['cmd'] == 'createBucket') && ($_POST['bucketName'])) {
 
 // delete a bucket and all keys from it
 if (($_GET['cmd'] == 'delBucket') && ($_GET['bucketName'])) {
-//    $keys = $bucket->getKeys();
-
-    $stream = $bucket->getContentStream();
-    if ($stream) {
-        require_once dirname(__FILE__) . '/lib/DeleteMaker.php';
-        require_once dirname(__FILE__) . '/lib/jsonstreamingparser/RiakParser.php';
-
-        $listener = new DeleteMaker($riak, $bucket);
-        try {
-            $parser = new RiakParser($stream, $listener);
-            $parser->parse();
-        } catch (Exception $e) {
-            fclose($stream);
-            throw $e;
+    if (RIAK_DATA_MIGRATOR) {
+        if (RIAK_DATA_MIGRATOR_WORKING_PATH) {
+            $folder = RIAK_DATA_MIGRATOR_WORKING_PATH;
+        } else {
+            $folder = sys_get_temp_dir();
         }
-        fclose($stream);
-    } else {
-        echo "No stream";
-        exit;
-    }
 
-//    $count = count($keys);
-//    for ($i = 0; $i < $count; $i++) {
-//        $key = new RiakObject($riak, $bucket, $keys[$i]);
-//        $key->delete();
-//    }
-    // i don't need to delete the bucket, since it will be removed automatically when no keys are in it
+        $command = RIAK_DATA_MIGRATOR . " -h " . escapeshellarg(HOST) . " -p " . intval(BUFFERS_PORT) . " -r " . escapeshellarg($folder) . " -b " . escapeshellarg($_GET['bucketName']) . " --delete 2>&1";
+        disable_ob();
+    } else {
+        $stream = $bucket->getContentStream();
+        disable_ob();
+    }
 }
 
 // add a new KEY in RIAK
@@ -108,7 +94,33 @@ if (($_GET['cmd'] == 'updateKey') && (isset($_POST['key'][0])) && (isset($_POST[
 
     echo '<div class="msg">Value updated in RIAK.</div>';
 }
+
+function disable_ob() {
+    // Turn off output buffering
+    ini_set('output_buffering', 'off');
+    // Turn off PHP output compression
+    ini_set('zlib.output_compression', false);
+    // Implicitly flush the buffer(s)
+    ini_set('implicit_flush', true);
+    ob_implicit_flush(true);
+    // Clear, and turn off output buffering
+    while (ob_get_level() > 0) {
+        // Get the curent level
+        $level = ob_get_level();
+        // End the buffering
+        ob_end_clean();
+        // If the current level has not changed, abort
+        if (ob_get_level() == $level)
+            break;
+    }
+    // Disable apache output buffering/compression
+    if (function_exists('apache_setenv')) {
+        apache_setenv('no-gzip', '1');
+        apache_setenv('dont-vary', '1');
+    }
+}
 ?>
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
 <html>
     <head>
         <title>RiakAdmin v<?php echo VERSION . ' @ ' . HOST; ?></title>
@@ -127,22 +139,60 @@ if (($_GET['cmd'] == 'updateKey') && (isset($_POST['key'][0])) && (isset($_POST[
             .msg { border: 1px dashed; text-align: center; margin-left: auto; margin-right: auto; margin: 10px; font-weight: bold; background-color: #f0f0f0; padding: 7px;}
             .msgSmall { font-size: 12px; margin-left: auto; margin-right: auto; text-align: justify; padding: 5px; }
         </style>
-        <?php
-        if ($_GET['cmd'] == 'delBucket') {
-            echo '    <meta http-equiv="refresh" content="10; url=?">';
-        }
-        ?>
     </head>
     <body>
         <div class="page">
+            <div class="left"><?php echo left_menu(); ?></div>
             <?php
-            if ($_GET['cmd'] == 'delBucket') {
-                echo '<div class="msg">Please wait... the delete is not instant as you could have thousands of keys in this bucket... if the bucket is still present, issue this command again!</div>';
+            if (!empty($command)) {
+                ?>
+                <div class="right">
+                    <pre style="margin-left: 10px;"><?php
+                        passthru($command, $output);
+                        ?></pre>
+                </div>
+                <?php
+            } elseif ($stream) {
+                require_once dirname(__FILE__) . '/lib/DeleteMaker.php';
+                require_once dirname(__FILE__) . '/lib/jsonstreamingparser/RiakParser.php';
+                ?>
+                <div class="right">
+                    <p style="margin-left: 10px;">
+                        <span style="font-size: 16px;font-weight: bold;">Deleting keys using streaming
+                            <br/>
+                        </span>
+                        <br/>
+                        <b>Deleted keys:</b>
+                        <?php
+                        $listener = new DeleteMaker($riak, $bucket);
+                        try {
+                            $parser = new RiakParser($stream, $listener);
+                            $parser->parse();
+                        } catch (Exception $e) {
+                            fclose($stream);
+                            throw $e;
+                        }
+                        fclose($stream);
+                        ?>
+                        <br/>
+                        <br/>
+                        <b>Delete completed!</b> 
+                        <br/>
+                        <small style="color: gray">* The bucket might be present while delete is syncronized with all nodes. In a few seconds all should be deleted.</small>
+                    </p>
+                </div>
+                <?php
+            } else {
+                ?>
+                <div class="right"><?php echo right_content(); ?></div>
+                <?php
             }
             ?>
-            <div class="left"><?php echo left_menu(); ?></div>
-            <div class="right"><?php echo right_content(); ?></div>
         </div>
+        <?php
+        $page_generation = microtime(true) - $start_page;
+        echo '<div class="msg">It took me ' . number_format($page_generation, 3) . ' seconds to generate this page...</div>';
+        ?>
     </body>
 </html>
 
@@ -176,7 +226,7 @@ function left_menu() {
             } else {
                 $ret .= '<li class="bucketName"><a href="?cmd=useBucket&bucketName=' . $buckets[$i]->getName() . '">' . $buckets[$i]->getName() . '</a><br>';
             }
-            $ret .= ' <a href="?cmd=delBucket&bucketName=' . $buckets[$i]->getName() . '" class="bucketActions">[ Delete bucket ]</a><br><br>';
+            $ret .= ' <a href="?cmd=delBucket&bucketName=' . $buckets[$i]->getName() . '" class="bucketActions" onclick="return confirm(\'Are you sure you want to delete?\');">[ Delete bucket ]</a><br><br>';
         }
         $ret .= '
             </ul>';
@@ -327,8 +377,3 @@ function right_content() {
     $ret .= '</div>';
     return $ret;
 }
-
-$page_generation = microtime(true) - $start_page;
-echo '<div class="msg">It took me ' . number_format($page_generation, 3) . ' seconds to generate this page...</div>';
-?>
-<br><br>
