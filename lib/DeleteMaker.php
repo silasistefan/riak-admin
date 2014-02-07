@@ -6,6 +6,7 @@ require_once dirname(__FILE__) . '/ArrayMaker.php';
 
 class DeleteMaker extends ArrayMaker {
 
+    protected $_count = 0;
     public $_riak;
     public $_bucket;
 
@@ -17,7 +18,8 @@ class DeleteMaker extends ArrayMaker {
     }
 
     public function end_array() {
-        if (is_array($this->_stack))
+        if (is_array($this->_stack)) {
+            require_once dirname(__FILE__) . '/riak-client.php';
             foreach ($this->_stack as $key => $value) {
                 $this->deleteAll($value);
                 $this->_json = $value;
@@ -25,12 +27,12 @@ class DeleteMaker extends ArrayMaker {
                 unset($this->_stack[$key]);
                 $key = null;
             }
+        }
         $this->end_object();
     }
 
     public function deleteAll($values) {
         if (is_array($values)) {
-            require_once dirname(__FILE__) . '/riak-client.php';
             foreach ($values as $val) {
                 if (!empty($val)) {
                     set_time_limit(30);
@@ -39,6 +41,11 @@ class DeleteMaker extends ArrayMaker {
                         $riak_key->delete();
                     }
                 }
+            }
+            $n = count($values);
+            $this->_count += $n;
+            if ($n && $this->_count) {
+                echo sprintf("%d... ", $this->_count);
             }
         }
     }
