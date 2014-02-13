@@ -4,7 +4,7 @@ error_reporting(1);
 /**
  * Riak Admin version
  */
-define('VERSION', '0.4');
+define('VERSION', '0.5');
 
 /**
  * your RIAK server
