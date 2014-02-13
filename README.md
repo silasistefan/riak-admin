@@ -55,8 +55,11 @@ After provision riak-admin will be available at [http://localhost:7654](http://l
 [Download](https://github.com/pentium10/riak-admin/archive/master.zip), unzip files to your *wwww* directory, edit config.php, and enjoy!
 
 
-### Change Log 
+### Change Log
 ***************************
+**v0.5**
+- (New): Favorite based bucket listing, to avoid costly getBuckets of Riak, UI enhancements ([carmensingeorzan](https://github.com/carmensingeorzan))
+
 **v0.4**
 - (New): Composer and Vagrant support ([pentium10](https://github.com/pentium10))
 

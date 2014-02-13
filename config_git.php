@@ -1,10 +1,10 @@
 <?php
 
-error_reporting(1);
+ini_set('display_errors', 1);
 /**
  * Riak Admin version
  */
-define('VERSION', '0.5');
+define('VERSION', '0.3');
 
 /**
  * your RIAK server

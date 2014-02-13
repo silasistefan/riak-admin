@@ -29,11 +29,30 @@ if (($_GET['cmd'] == "deleteKey") && ($_GET['bucketName']) && ($_GET['key'])) {
 }
 
 // create a bucket with key=>value : "created"=>1
-if (($_GET['cmd'] == 'createBucket') && ($_POST['bucketName'])) {
-    $data = array("created" => 1);
-    $bucket = new RiakBucket($riak, $_POST['bucketName']);
-    $x = $bucket->newObject("", $data);
-    $x->store();
+if (($_GET['cmd'] == 'createBucket')) {
+    if ($_POST['bucketName'] && ($_POST['bucketName'] != 'Create a new bucket')) {
+        $data = array("created" => 1);
+        $bucket = new RiakBucket($riak, $_POST['bucketName']);
+        $x = $bucket->newObject("", $data);
+        $x->store();
+
+        $buckets_json = $_COOKIE['buckets'];
+
+        if (!empty($buckets_json)) {
+            $buckets_array = json_decode($buckets_json, true);
+
+            if (is_array($buckets_array)) {
+                $buckets_array[] = $_POST['bucketName'];
+            }
+            $buckets = json_encode($buckets_array);
+            setcookie('buckets', $buckets);
+
+            $page = $_SERVER['PHP_SELF'];
+            header("Refresh: 0; url=$page/../");
+        }
+    } else {
+        ?><div class="msg">Bucket Name can't be empty.</div><?php
+    }
 }
 
 // delete a bucket and all keys from it
@@ -51,6 +70,25 @@ if (($_GET['cmd'] == 'delBucket') && ($_GET['bucketName'])) {
         $stream = $bucket->getContentStream();
         disable_ob();
     }
+
+    $buckets_json = $_COOKIE['buckets'];
+
+    if (!empty($buckets_json)) {
+        $buckets_array = json_decode($buckets_json, true);
+
+        if (is_array($buckets_array)) {
+            $buckets_array = array_flip($buckets_array);
+            unset($buckets_array[$_GET['bucketName']]);
+
+            $buckets_array = array_flip($buckets_array);
+            $buckets = json_encode($buckets_array);
+
+            setcookie('buckets', $buckets);
+        }
+    }
+}
+if (($_GET['cmd'] == 'manageBuckets')) {
+    disable_ob();
 }
 
 // add a new KEY in RIAK
@@ -78,42 +116,65 @@ if (($_GET['cmd'] == 'saveKey')) {
 }
 
 // update the KEY with new $data
-if (($_GET['cmd'] == 'updateKey') && (isset($_POST['key'][0])) && (isset($_POST['value'][0]))) {
+if (($_GET['cmd'] == 'updateKey') && (isset($_POST['value']))) {
     $arrVal = $_POST['value'];
-    $arrKey = $_POST['key'];
 
-    foreach ($arrKey AS $index => $keyTmp) {
-        if ($arrVal[$index]) {
-            $value = $arrVal[$index];
-            $data[$keyTmp] = $value;
+    if (is_array($arrVal)) {
+        foreach ($arrVal as $data) {
+            if (!empty($data)) {
+                $data = json_decode($data);
+                $obj = $bucket->newObject($_GET['key'], $data);
+                $obj->store();
+                echo '<div class="msg">Value updated in RIAK.</div>';
+            } else {
+                echo '<div class="msg">You can\'t save an empty value</div>';
+            }
         }
     }
+}
 
-    $obj = $bucket->newObject($_GET['key'], $data);
-    $obj->store();
+//remove bucket from cookie
+if ($_GET['cmd'] == 'removeBucketFromCookie') {
 
-    echo '<div class="msg">Value updated in RIAK.</div>';
+    $buckets_json = $_COOKIE['buckets'];
+
+    if (!empty($buckets_json)) {
+        $buckets_array = json_decode($buckets_json, true);
+
+        if (is_array($buckets_array)) {
+            $buckets_array = array_flip($buckets_array);
+            unset($buckets_array[$_GET['bucketName']]);
+
+            $buckets_array = array_flip($buckets_array);
+            $buckets = json_encode($buckets_array);
+
+            setcookie('buckets', $buckets);
+
+            $page = $_SERVER['PHP_SELF'];
+            header("Refresh: 0; url=$page/../");
+        }
+    }
 }
 
 function disable_ob() {
-    // Turn off output buffering
+// Turn off output buffering
     ini_set('output_buffering', 'off');
-    // Turn off PHP output compression
+// Turn off PHP output compression
     ini_set('zlib.output_compression', false);
-    // Implicitly flush the buffer(s)
+// Implicitly flush the buffer(s)
     ini_set('implicit_flush', true);
     ob_implicit_flush(true);
-    // Clear, and turn off output buffering
+// Clear, and turn off output buffering
     while (ob_get_level() > 0) {
-        // Get the curent level
+// Get the curent level
         $level = ob_get_level();
-        // End the buffering
+// End the buffering
         ob_end_clean();
-        // If the current level has not changed, abort
+// If the current level has not changed, abort
         if (ob_get_level() == $level)
             break;
     }
-    // Disable apache output buffering/compression
+// Disable apache output buffering/compression
     if (function_exists('apache_setenv')) {
         apache_setenv('no-gzip', '1');
         apache_setenv('dont-vary', '1');
@@ -125,7 +186,9 @@ function disable_ob() {
     <head>
         <title>RiakAdmin v<?php echo VERSION . ' @ ' . HOST; ?></title>
         <style type="text/css">
-            body { background-color: #fff; color: #666; font-family: sans-serif, Arial; font-size: 14px; margin: 0px; margin-top: 10px;}
+            body { background-color: #fff; color: #666; font-family: sans-serif, Arial; font-size: 12px; margin: 0px; margin-top: 10px;}
+            a {color: #002aFF;}
+            a:hover { text-decoration: underline;color: #333 !important;}
             h3 {text-decoration: underline;}
             .page {width: 1200px; margin-left: auto; margin-right: auto; text-align: center;}
             .left { background-color: #f8f8f8; width: 300px; padding: 7px; display: table-cell; text-align: left; border: 1px solid #666; border-right: 0px; vertical-align: top;}
@@ -138,6 +201,7 @@ function disable_ob() {
             .td_right { border: 1px dashed; border-left: 0px; display: table-cell; width: 600px; padding: 7px; vertical-align: middle;}
             .msg { border: 1px dashed; text-align: center; margin-left: auto; margin-right: auto; margin: 10px; font-weight: bold; background-color: #f0f0f0; padding: 7px;}
             .msgSmall { font-size: 12px; margin-left: auto; margin-right: auto; text-align: justify; padding: 5px; }
+            .clear { clear:both }
         </style>
     </head>
     <body>
@@ -211,22 +275,39 @@ function left_menu() {
     <div class="msgSmall">When creating a new bucket, a key named "created" with value "1" will be set in that bucket.</div>
     <hr>';
 
-    // bucket list
-    $buckets = $riak->buckets();
+    $buckets = $_COOKIE['buckets'];
+    $buckets = json_decode($buckets, true);
+
     if (count($buckets) == 0) {
-        $ret .= '<b>No buckets found. Create one?</b>';
+        if (empty($_GET['cmd'])) {
+            header("Location: ?cmd=manageBuckets");
+        }
+        $ret .= '<b>No favorite buckets found for listing. <a href="?cmd=manageBuckets">Choose one?</a></b>';
     } else {
-        $ret .= 'List of current buckets:
+        $ret .= '<div>
+                    <div style="float:left">Favorite buckets:</div>
+                    <div style="float:right"><a href="?cmd=manageBuckets">Manage</a></div>
+                   </div>
+            <div class="clear"></div>
             <ul type="square">';
-        for ($i = 0; $i < count($buckets); $i++) {
-            if ($buckets[$i]->getName() == $_GET['bucketName']) {
-                $ret .= '<li class="bucketNameSelected"><a href="?cmd=useBucket&bucketName=' . $buckets[$i]->getName() . '">' . $buckets[$i]->getName() . '</a><br>
-                    <a href="?cmd=addKey&bucketName=' . $_GET['bucketName'] . '" class="bucketActions">[ Add a new key ]</a><br>
-                    <a href="?cmd=findKey&bucketName=' . $_GET['bucketName'] . '" class="bucketActions">[ Find a key ]</a><br>';
-            } else {
-                $ret .= '<li class="bucketName"><a href="?cmd=useBucket&bucketName=' . $buckets[$i]->getName() . '">' . $buckets[$i]->getName() . '</a><br>';
+
+        foreach ($buckets as $bucket) {
+            if (($_GET['cmd'] == 'delBucket') && ($_GET['bucketName'] == $bucket)) {
+                continue;
             }
-            $ret .= ' <a href="?cmd=delBucket&bucketName=' . $buckets[$i]->getName() . '" class="bucketActions" onclick="return confirm(\'Are you sure you want to delete?\');">[ Delete bucket ]</a><br><br>';
+            if ($bucket == $_GET['bucketName']) {
+                $ret .= '<li class="bucketNameSelected">'
+                        . '<a href="?cmd=useBucket&bucketName=' . $bucket . '">' . $bucket . '</a><br/>'
+                        . '<a href="?cmd=addKey&bucketName=' . $_GET['bucketName'] . '" class="bucketActions">[ Add a new key ]</a><br/>'
+                        . '<a href="?cmd=findKey&bucketName=' . $_GET['bucketName'] . '" class="bucketActions">[ Find a key ]</a><br/>'
+                        . '<a href="?cmd=delBucket&bucketName=' . $bucket . '" class="bucketActions" onclick="return confirm(\'Are you sure you want to delete?\');">[ Delete bucket ]</a><br/>'
+                        . '<a href="?cmd=removeBucketFromCookie&bucketName=' . $bucket . '" class="bucketActions">[ Remove from favorites]</a><br/>'
+                        . '</li><br/>';
+            } else {
+                $ret .= '<li class="bucketNameSelected">'
+                        . '<a href="?cmd=useBucket&bucketName=' . $bucket . '">'
+                        . $bucket . '</a></li><br/>';
+            }
         }
         $ret .= '
             </ul>';
@@ -345,35 +426,129 @@ function right_content() {
         <form name="updateKey" method="POST" action="?cmd=updateKey&bucketName=' . $_GET['bucketName'] . '&key=' . $_GET['key'] . '">
         <div class="content">
             <h3>Selected KEY: "' . $_GET['key'] . '"</h3>
-            <div class="td_left" align="center"><b>FIELD</b></div>
-            <div class="td_right" align="center"><b>VALUE</b></div>
         </div>';
-        $total = 0;
-        foreach ($key->reload()->getData() as $key => $value) {
-            $total++;
-            $ret .= '
-            <div class="content">
-                <div class="td_left"><input type="text" name="key[]" value="' . $key . '"></div>
-                <div class="td_right"><textarea name="value[]" rows="3" cols="30">' . $value . "</textarea></div>
-            </div>";
+        $arr_key = $key->reload()->getData();
+        if (!empty($arr_key)) {
+            $key = json_readable_encode($arr_key);
+            $ret .= '<div class="content">'
+                    . '<textarea id="documentdata" name="value[]" style="width:778px; height:375px;">' . $key . "</textarea>"
+                    . "<script>document.getElementById('documentdata').value=document.getElementById('documentdata').value.replace(/\*\/[^\/]+$/, '').replace(/\t/g, ' ');</script>"
+                    . "</div>"
+                    . '<input type="submit" name="ok" value="Save">';
+        } else {
+            $ret = '<div class="msg">For some reasons, this key could not be read.</div>';
         }
-        if ($total == 0) {
-            $ret = '
-            <div class="msg">For some reasons, this key could not be read.</div>';
-        }
+
         $ret .= '
-        <div style="text-align: center;">
-            <input type="submit" name="ok" value="Save" align="center">
-            <a href="#" onClick="document.getElementById(\'fieldList\').innerHTML=document.getElementById(\'fieldList\').innerHTML + \'<div class=content><div class=td_left><input type=text name=key[]></div><div class=td_right><textarea name=value[] rows=3 cols=30></textarea></div></div>\'">Add another key => value!</a>
-        </div>
-        <div id="fieldList"></div>
-        </form>';
-    }
-    // first page
-    else {
-        $ret = '
-        <div class="msg">Chose a bucket from the left panel, or create a new one...</div>';
-    }
-    $ret .= '</div>';
-    return $ret;
-}
+            <div id = "fieldList"></div>
+       </form>';
+    } elseif ($_GET['cmd'] == 'setCookies') {
+        $ret .= '<div="content">'
+                . '<div style="float:left"><img src="' . $_SERVER['SCRIPT_NAME'] . '/../images/iLoading.gif" style="width:90px;"/></div>'
+                . '<div style="float:left; margin-top:30px;">Loading...</div>'
+                . '</div>';
+
+        if (isset($_POST)) {
+            $arr = $_POST;
+            $buckets = array();
+
+            if (is_array($arr)) {
+                foreach ($arr as $key => $value) {
+                    $buckets[] = $key;
+                }
+            }
+            $buckets = json_encode($buckets);
+            setcookie('buckets', $buckets);
+        }
+
+        $page = $_SERVER['PHP_SELF'];
+        header("Refresh: 0; url=$page/../");
+    } elseif ($_GET['cmd'] == 'manageBuckets') {
+        ?>
+        <form name="manageBuckets" action="?cmd=setCookies" method="POST">
+            <div class="content">
+                <div id="beforeLoad">Listing all known buckets (ones that have keys stored in them) from Riak...<br/>
+                    Please wait while this is fetched from all your nodes... <a href="http://docs.basho.com/riak/1.3.0/references/apis/http/HTTP-List-Buckets/" target="_blank">(i)</a>
+                </div>
+                <div class="clear"></div>
+                <div id="afterLoad" style='display:none'><h3>Manage Favorite Buckets:</h3>(select the buckets you want to be displayed on left, as we cannot read each time from Riak, <a href="http://docs.basho.com/riak/1.3.0/references/apis/http/HTTP-List-Buckets/" target="_blank">find out why</a>.)<br/><br/></div>
+
+                <?php
+                $buckets = $riak->buckets();
+                $b = json_decode($_COOKIE['buckets'], true);
+
+                if (is_array($buckets)) {
+                    foreach ($buckets as $bucket) {
+                        if (is_array($b) && in_array($bucket->name, $b)) {
+                            $checked = true;
+                        } else {
+                            $checked = false;
+                        }
+
+                        $ret .= '<input type="checkbox" id="' . $bucket->name . '"' . ($checked ? 'checked="checked"' : '') . ' name="' . $bucket->name . '"> <label for="' . $bucket->name . '">' . $bucket->name . '</label><br/><br/>';
+                    }
+                }
+                $ret .= '<input type="submit" value="Save favorites"></form><br/><br/>';
+                $ret .= '* favorites are kept in cookies</div>';
+                ?>
+                <script>
+                    document.getElementById('afterLoad').style.display = document.getElementById('beforeLoad').style.display;
+                    document.getElementById('beforeLoad').style.display = 'none';
+                </script>
+                <?php
+            } else {
+                $ret = '
+            <div class = "msg">Chose a bucket from the left panel, or create a new one...</div>';
+            }
+            $ret .= '</div>';
+            return $ret;
+        }
+
+        function json_readable_encode($in, $indent = 0, Closure $_escape = null) {
+            if (__CLASS__ && isset($this)) {
+                $_myself = array($this, __FUNCTION__);
+            } elseif (__CLASS__) {
+                $_myself = array('self', __FUNCTION__);
+            } else {
+                $_myself = __FUNCTION__;
+            }
+
+            if (is_null($_escape)) {
+                $_escape = function ($str) {
+                    return str_replace(
+                            array('\\', '"', "\n", "\r", "\b", "\f", "\t", '/', '\\\\u'), array('\\\\', '\\"', "\\n", "\\r", "\\b", "\\f", "\\t", '\\/', '\\u'), $str);
+                };
+            }
+
+            $out = '';
+
+            foreach ($in as $key => $value) {
+                $out .= str_repeat("\t", $indent + 1);
+                $out .= "\"" . $_escape((string) $key) . "\": ";
+
+                if (is_object($value) || is_array($value)) {
+                    $out .= "\n";
+                    $out .= call_user_func($_myself, $value, $indent + 1, $_escape);
+                } elseif (is_bool($value)) {
+                    $out .= $value ? 'true' : 'false';
+                } elseif (is_null($value)) {
+                    $out .= 'null';
+                } elseif (is_string($value)) {
+                    $out .= "\"" . $_escape($value) . "\"";
+                } else {
+                    $out .= $value;
+                }
+
+                $out .= ",\n";
+            }
+
+            if (!empty($out)) {
+                $out = substr($out, 0, -2);
+            }
+
+            $out = str_repeat("\t", $indent) . "{\n" . $out;
+            $out .= "\n" . str_repeat("\t", $indent) . "}";
+
+            return $out;
+        }
+        
